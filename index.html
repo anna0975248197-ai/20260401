@@ -1,130 +1,342 @@
-import tkinter as tk
-from tkinter import messagebox
-import pygame  # 導入 pygame 處理音效
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>現代五子棋 - 音效增強版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            font-family: "Microsoft JhengHei", sans-serif;
+            touch-action: manipulation;
+        }
+        canvas {
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-width: 100%;
+            height: auto;
+            touch-action: none;
+        }
+        .wood-pattern {
+            background-color: #d2b48c;
+            background-image: url("https://www.transparenttextures.com/patterns/wood-pattern.png");
+        }
+        .tenpai-blink {
+            animation: blink 1.5s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(0.95); }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
 
-class GomokuAI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("五子棋 AI 對戰版 - 音效增強")
+    <div class="max-w-md w-full text-center space-y-6">
+        <div class="flex justify-between items-center px-2">
+            <h1 class="text-3xl font-bold text-yellow-500">五子棋 Gomoku</h1>
+            <!-- 音量控制切換 -->
+            <button id="soundToggle" class="p-2 bg-zinc-800 rounded-full hover:bg-zinc-700 transition-colors">
+                <span id="soundIcon">🔊</span>
+            </button>
+        </div>
         
-        # 初始化音效混音器
-        pygame.mixer.init()
-        try:
-            self.sound_place = pygame.mixer.Sound("place.wav")
-            self.sound_win = pygame.mixer.Sound("win.wav")
-        except:
-            print("警告：找不到音效檔案，將以靜音模式執行。")
-            self.sound_place = None
-            self.sound_win = None
+        <div id="status" class="flex items-center justify-center gap-3 text-xl font-semibold mb-2 h-10">
+            <div id="turn-text">載入中...</div>
+            <div id="tenpai-badge" class="hidden tenpai-blink bg-red-600 text-white text-xs px-2 py-1 rounded-full shadow-lg border border-red-400">
+                聽牌中！
+            </div>
+        </div>
 
-        self.grid_size = 15
-        self.cell_size = 40
-        self.margin = 30
-        self.board = [[0 for _ in range(self.grid_size)] for _ in range(self.grid_size)]
-        self.turn = 1 
+        <div class="relative inline-block border-8 border-yellow-700 rounded-lg overflow-hidden">
+            <canvas id="board" width="600" height="600" class="wood-pattern cursor-pointer"></canvas>
+        </div>
+
+        <div class="flex gap-4 justify-center mt-4">
+            <button id="undoBtn" class="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-full transition-all flex items-center gap-2">
+                <span>↩️</span> 悔棋
+            </button>
+            <button id="resetBtn" class="px-6 py-2 bg-red-600 hover:bg-red-500 rounded-full transition-all flex items-center gap-2">
+                <span>🔄</span> 重置
+            </button>
+        </div>
+
+        <div class="text-sm text-gray-500 mt-4">
+            <p>規則：連成五子即獲勝。藍色圓圈為「聽牌」提示點。</p>
+        </div>
+    </div>
+
+    <!-- 獲勝彈窗 -->
+    <div id="modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-50">
+        <div class="bg-zinc-800 p-8 rounded-2xl text-center shadow-2xl border border-zinc-700">
+            <h2 id="winnerMsg" class="text-4xl font-bold mb-6 text-white">黑棋獲勝！</h2>
+            <button onclick="resetGame()" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white rounded-xl font-bold text-lg transition-transform active:scale-95">
+                再玩一局
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 音效資源
+        const sounds = {
+            place: new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'),
+            win: new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3'),
+            undo: new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'),
+            click: new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3')
+        };
+
+        let isSoundEnabled = true;
+
+        function playSound(name) {
+            if (isSoundEnabled && sounds[name]) {
+                sounds[name].currentTime = 0;
+                sounds[name].play().catch(e => console.log("音效播放被攔截，請先點擊頁面"));
+            }
+        }
+
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        const turnText = document.getElementById('turn-text');
+        const tenpaiBadge = document.getElementById('tenpai-badge');
+        const undoBtn = document.getElementById('undoBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const soundToggle = document.getElementById('soundToggle');
+        const soundIcon = document.getElementById('soundIcon');
+        const modal = document.getElementById('modal');
+        const winnerMsg = document.getElementById('winnerMsg');
+
+        const GRID_SIZE = 15;
+        const PADDING = 40;
+        let CELL_SIZE = (canvas.width - PADDING * 2) / (GRID_SIZE - 1);
         
-        self.vs_ai = messagebox.askyesno("模式選擇", "是否與 AI 對戰？")
-        
-        self.canvas = tk.Canvas(root, width=self.grid_size * self.cell_size + self.margin,
-                                 height=self.grid_size * self.cell_size + self.margin, bg="#E3C16F")
-        self.canvas.pack()
-        
-        self.draw_board()
-        self.canvas.bind("<Button-1>", self.click_event)
+        let board = []; 
+        let history = [];
+        let currentPlayer = 1; 
+        let gameOver = false;
+        let tenpaiPoints = []; 
 
-    def play_sound(self, sound_type):
-        """播放指定音效"""
-        if sound_type == "place" and self.sound_place:
-            self.sound_place.play()
-        elif sound_type == "win" and self.sound_win:
-            self.sound_win.play()
+        function initBoard() {
+            board = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+            history = [];
+            currentPlayer = 1;
+            gameOver = false;
+            tenpaiPoints = [];
+            updateStatus();
+            draw();
+        }
 
-    def draw_board(self):
-        for i in range(self.grid_size):
-            self.canvas.create_line(self.margin, self.margin + i * self.cell_size,
-                                    self.margin + (self.grid_size - 1) * self.cell_size, self.margin + i * self.cell_size)
-            self.canvas.create_line(self.margin + i * self.cell_size, self.margin,
-                                    self.margin + i * self.cell_size, self.margin + (self.grid_size - 1) * self.cell_size)
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 繪製格線
+            ctx.strokeStyle = '#5d4037';
+            ctx.lineWidth = 1.5;
+            for (let i = 0; i < GRID_SIZE; i++) {
+                ctx.beginPath();
+                ctx.moveTo(PADDING, PADDING + i * CELL_SIZE);
+                ctx.lineTo(canvas.width - PADDING, PADDING + i * CELL_SIZE);
+                ctx.stroke();
 
-    def click_event(self, event):
-        x = round((event.x - self.margin) / self.cell_size)
-        y = round((event.y - self.margin) / self.cell_size)
+                ctx.beginPath();
+                ctx.moveTo(PADDING + i * CELL_SIZE, PADDING);
+                ctx.lineTo(PADDING + i * CELL_SIZE, canvas.height - PADDING);
+                ctx.stroke();
+            }
 
-        if 0 <= x < self.grid_size and 0 <= y < self.grid_size and self.board[y][x] == 0:
-            # 只有在玩家回合（或非 AI 模式）才響應點擊
-            if not self.vs_ai or self.turn == 1:
-                self.place_piece(x, y)
-                if self.vs_ai and self.turn == 2:
-                    self.root.after(600, self.ai_move)
+            // 星位
+            const stars = [3, 7, 11];
+            stars.forEach(r => {
+                stars.forEach(c => {
+                    if ((r === 7 && c === 7) || (r !== 7 && c !== 7)) {
+                        ctx.beginPath();
+                        ctx.arc(PADDING + c * CELL_SIZE, PADDING + r * CELL_SIZE, 4, 0, Math.PI * 2);
+                        ctx.fillStyle = '#5d4037';
+                        ctx.fill();
+                    }
+                });
+            });
 
-    def place_piece(self, x, y):
-        self.board[y][x] = self.turn
-        self.play_sound("place")  # 落子音效
-        
-        color = "black" if self.turn == 1 else "white"
-        r = self.cell_size // 2 - 2
-        px = self.margin + x * self.cell_size
-        py = self.margin + y * self.cell_size
-        self.canvas.create_oval(px-r, py-r, px+r, py+r, fill=color, tags="piece")
+            // 聽牌提示
+            if (!gameOver) {
+                tenpaiPoints.forEach(pt => {
+                    ctx.beginPath();
+                    ctx.arc(PADDING + pt.c * CELL_SIZE, PADDING + pt.r * CELL_SIZE, CELL_SIZE * 0.3, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(59, 130, 246, 0.4)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
+                    ctx.setLineDash([5, 3]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                });
+            }
 
-        if self.check_win(x, y, self.turn):
-            self.play_sound("win")  # 勝利音效
-            winner = "黑方" if self.turn == 1 else "白方"
-            messagebox.showinfo("遊戲結束", f"{winner} 獲勝！")
-            self.reset_game()
-        else:
-            self.turn = 3 - self.turn
+            // 棋子
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (board[r][c] !== 0) {
+                        drawStone(r, c, board[r][c]);
+                    }
+                }
+            }
 
-    def ai_move(self):
-        # ... (此處保留之前的 AI 評分邏輯，節省長度略過)
-        best_score = -1
-        best_pos = None
-        for y in range(self.grid_size):
-            for x in range(self.grid_size):
-                if self.board[y][x] == 0:
-                    score = self.evaluate_point(x, y, 2) + self.evaluate_point(x, y, 1) * 0.8
-                    if score > best_score:
-                        best_score, best_pos = score, (x, y)
-        if best_pos:
-            self.place_piece(best_pos[0], best_pos[1])
+            // 最後一手
+            if (history.length > 0) {
+                const last = history[history.length - 1];
+                ctx.beginPath();
+                ctx.arc(PADDING + last.c * CELL_SIZE, PADDING + last.r * CELL_SIZE, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff5252';
+                ctx.fill();
+            }
+        }
 
-    def evaluate_point(self, x, y, player):
-        # 簡單評分邏輯（同前一版）
-        score = 0
-        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
-        for dx, dy in directions:
-            count = 0
-            for d in [1, -1]:
-                nx, ny = x + dx*d, y + dy*d
-                while 0 <= nx < self.grid_size and 0 <= ny < self.grid_size and self.board[ny][nx] == player:
-                    count += 1
-                    nx += dx*d
-                    ny += dy*d
-            if count >= 4: score += 10000
-            elif count == 3: score += 1000
-            elif count == 2: score += 100
-        return score
+        function drawStone(r, c, player) {
+            const x = PADDING + c * CELL_SIZE;
+            const y = PADDING + r * CELL_SIZE;
+            const radius = CELL_SIZE * 0.42;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            const gradient = ctx.createRadialGradient(x - radius/3, y - radius/3, radius/10, x, y, radius);
+            if (player === 1) {
+                gradient.addColorStop(0, '#4a4a4a');
+                gradient.addColorStop(1, '#000000');
+            } else {
+                gradient.addColorStop(0, '#ffffff');
+                gradient.addColorStop(1, '#dcdcdc');
+            }
+            ctx.fillStyle = gradient;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.strokeStyle = player === 1 ? '#000' : '#bbb';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
 
-    def check_win(self, x, y, player):
-        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
-        for dx, dy in directions:
-            count = 1
-            for d in [1, -1]:
-                nx, ny = x + dx*d, y + dy*d
-                while 0 <= nx < self.grid_size and 0 <= ny < self.grid_size and self.board[ny][nx] == player:
-                    count += 1
-                    nx += dx*d
-                    ny += dy*d
-            if count >= 5: return True
-        return False
+        function handleMove(e) {
+            if (gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const x = (clientX - rect.left) * scaleX;
+            const y = (clientY - rect.top) * scaleY;
+            const c = Math.round((x - PADDING) / CELL_SIZE);
+            const r = Math.round((y - PADDING) / CELL_SIZE);
 
-    def reset_game(self):
-        self.board = [[0 for _ in range(self.grid_size)] for _ in range(self.grid_size)]
-        self.canvas.delete("all")
-        self.draw_board()
-        self.turn = 1
+            if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE && board[r][c] === 0) {
+                placeStone(r, c);
+            }
+        }
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = GomokuAI(root)
-    root.mainloop()
+        function placeStone(r, c) {
+            board[r][c] = currentPlayer;
+            history.push({r, c, player: currentPlayer});
+            playSound('place');
+            
+            if (checkWin(r, c)) {
+                draw();
+                playSound('win');
+                showWinner(currentPlayer === 1 ? "黑棋" : "白棋");
+                gameOver = true;
+                return;
+            }
+
+            currentPlayer = currentPlayer === 1 ? 2 : 1;
+            updateTenpaiStatus();
+            updateStatus();
+            draw();
+        }
+
+        function checkWin(r, c) {
+            return countMax(r, c, board[r][c]) >= 5;
+        }
+
+        function countMax(r, c, player) {
+            const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+            let maxCount = 0;
+            for (let [dr, dc] of directions) {
+                let count = 1;
+                for (let i = 1; i < 5; i++) {
+                    const nr = r + dr * i, nc = c + dc * i;
+                    if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && board[nr][nc] === player) count++; else break;
+                }
+                for (let i = 1; i < 5; i++) {
+                    const nr = r - dr * i, nc = c - dc * i;
+                    if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && board[nr][nc] === player) count++; else break;
+                }
+                maxCount = Math.max(maxCount, count);
+            }
+            return maxCount;
+        }
+
+        function updateTenpaiStatus() {
+            tenpaiPoints = [];
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (board[r][c] === 0) {
+                        if (countMax(r, c, 1) >= 5 || countMax(r, c, 2) >= 5) {
+                            tenpaiPoints.push({r, c});
+                        }
+                    }
+                }
+            }
+            tenpaiPoints.length > 0 ? tenpaiBadge.classList.remove('hidden') : tenpaiBadge.classList.add('hidden');
+        }
+
+        function updateStatus() {
+            if (currentPlayer === 1) {
+                turnText.innerHTML = '輪到 <span class="text-black bg-white px-3 py-1 rounded-md shadow-sm">黑棋</span> 落子';
+            } else {
+                turnText.innerHTML = '輪到 <span class="text-white bg-gray-500 px-3 py-1 rounded-md shadow-sm">白棋</span> 落子';
+            }
+        }
+
+        function showWinner(name) {
+            winnerMsg.innerText = `${name} 獲勝！`;
+            modal.style.display = 'flex';
+            tenpaiBadge.classList.add('hidden');
+        }
+
+        function resetGame() {
+            playSound('click');
+            modal.style.display = 'none';
+            initBoard();
+        }
+
+        function undo() {
+            if (history.length === 0 || gameOver) return;
+            playSound('undo');
+            const last = history.pop();
+            board[last.r][last.c] = 0;
+            currentPlayer = last.player;
+            updateTenpaiStatus();
+            updateStatus();
+            draw();
+        }
+
+        // 音量切換邏輯
+        soundToggle.addEventListener('click', () => {
+            isSoundEnabled = !isSoundEnabled;
+            soundIcon.innerText = isSoundEnabled ? '🔊' : '🔇';
+            playSound('click');
+        });
+
+        canvas.addEventListener('mousedown', handleMove);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleMove(e);
+        });
+        undoBtn.addEventListener('click', undo);
+        resetBtn.addEventListener('click', resetGame);
+
+        window.onload = initBoard;
+    </script>
+</body>
+</html>
