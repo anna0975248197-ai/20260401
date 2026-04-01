@@ -1,0 +1,130 @@
+import tkinter as tk
+from tkinter import messagebox
+import pygame  # 導入 pygame 處理音效
+
+class GomokuAI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("五子棋 AI 對戰版 - 音效增強")
+        
+        # 初始化音效混音器
+        pygame.mixer.init()
+        try:
+            self.sound_place = pygame.mixer.Sound("place.wav")
+            self.sound_win = pygame.mixer.Sound("win.wav")
+        except:
+            print("警告：找不到音效檔案，將以靜音模式執行。")
+            self.sound_place = None
+            self.sound_win = None
+
+        self.grid_size = 15
+        self.cell_size = 40
+        self.margin = 30
+        self.board = [[0 for _ in range(self.grid_size)] for _ in range(self.grid_size)]
+        self.turn = 1 
+        
+        self.vs_ai = messagebox.askyesno("模式選擇", "是否與 AI 對戰？")
+        
+        self.canvas = tk.Canvas(root, width=self.grid_size * self.cell_size + self.margin,
+                                 height=self.grid_size * self.cell_size + self.margin, bg="#E3C16F")
+        self.canvas.pack()
+        
+        self.draw_board()
+        self.canvas.bind("<Button-1>", self.click_event)
+
+    def play_sound(self, sound_type):
+        """播放指定音效"""
+        if sound_type == "place" and self.sound_place:
+            self.sound_place.play()
+        elif sound_type == "win" and self.sound_win:
+            self.sound_win.play()
+
+    def draw_board(self):
+        for i in range(self.grid_size):
+            self.canvas.create_line(self.margin, self.margin + i * self.cell_size,
+                                    self.margin + (self.grid_size - 1) * self.cell_size, self.margin + i * self.cell_size)
+            self.canvas.create_line(self.margin + i * self.cell_size, self.margin,
+                                    self.margin + i * self.cell_size, self.margin + (self.grid_size - 1) * self.cell_size)
+
+    def click_event(self, event):
+        x = round((event.x - self.margin) / self.cell_size)
+        y = round((event.y - self.margin) / self.cell_size)
+
+        if 0 <= x < self.grid_size and 0 <= y < self.grid_size and self.board[y][x] == 0:
+            # 只有在玩家回合（或非 AI 模式）才響應點擊
+            if not self.vs_ai or self.turn == 1:
+                self.place_piece(x, y)
+                if self.vs_ai and self.turn == 2:
+                    self.root.after(600, self.ai_move)
+
+    def place_piece(self, x, y):
+        self.board[y][x] = self.turn
+        self.play_sound("place")  # 落子音效
+        
+        color = "black" if self.turn == 1 else "white"
+        r = self.cell_size // 2 - 2
+        px = self.margin + x * self.cell_size
+        py = self.margin + y * self.cell_size
+        self.canvas.create_oval(px-r, py-r, px+r, py+r, fill=color, tags="piece")
+
+        if self.check_win(x, y, self.turn):
+            self.play_sound("win")  # 勝利音效
+            winner = "黑方" if self.turn == 1 else "白方"
+            messagebox.showinfo("遊戲結束", f"{winner} 獲勝！")
+            self.reset_game()
+        else:
+            self.turn = 3 - self.turn
+
+    def ai_move(self):
+        # ... (此處保留之前的 AI 評分邏輯，節省長度略過)
+        best_score = -1
+        best_pos = None
+        for y in range(self.grid_size):
+            for x in range(self.grid_size):
+                if self.board[y][x] == 0:
+                    score = self.evaluate_point(x, y, 2) + self.evaluate_point(x, y, 1) * 0.8
+                    if score > best_score:
+                        best_score, best_pos = score, (x, y)
+        if best_pos:
+            self.place_piece(best_pos[0], best_pos[1])
+
+    def evaluate_point(self, x, y, player):
+        # 簡單評分邏輯（同前一版）
+        score = 0
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 0
+            for d in [1, -1]:
+                nx, ny = x + dx*d, y + dy*d
+                while 0 <= nx < self.grid_size and 0 <= ny < self.grid_size and self.board[ny][nx] == player:
+                    count += 1
+                    nx += dx*d
+                    ny += dy*d
+            if count >= 4: score += 10000
+            elif count == 3: score += 1000
+            elif count == 2: score += 100
+        return score
+
+    def check_win(self, x, y, player):
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 1
+            for d in [1, -1]:
+                nx, ny = x + dx*d, y + dy*d
+                while 0 <= nx < self.grid_size and 0 <= ny < self.grid_size and self.board[ny][nx] == player:
+                    count += 1
+                    nx += dx*d
+                    ny += dy*d
+            if count >= 5: return True
+        return False
+
+    def reset_game(self):
+        self.board = [[0 for _ in range(self.grid_size)] for _ in range(self.grid_size)]
+        self.canvas.delete("all")
+        self.draw_board()
+        self.turn = 1
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = GomokuAI(root)
+    root.mainloop()
